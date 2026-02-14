@@ -66,6 +66,8 @@ jobs:
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
         run: |
           set -euxo pipefail
+          # Remove potentially conflicting OpenSSL shim/symlink files on the runner
+          sudo rm -f /usr/local/lib/libssl.dylib /usr/local/lib/libcrypto.dylib /opt/homebrew/lib/libssl.dylib /opt/homebrew/lib/libcrypto.dylib || true
           # GitHub's prebuilt CPython (setup-python) on macOS can link _hashlib against Homebrew OpenSSL.
           # Nuitka's dependency scan fails if libssl.3.dylib is missing.
           brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3
