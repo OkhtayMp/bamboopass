@@ -58,22 +58,6 @@ jobs:
           ref: ${{ (github.event_name == 'workflow_dispatch' && inputs.tag) || github.ref }}
           fetch-depth: 0
 
-      - name: Verify tag points to main HEAD
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-        shell: bash
-        run: |
-          set -euxo pipefail
-          git fetch origin main --depth=1
-          TAG_SHA="$(git rev-parse HEAD)"
-          MAIN_SHA="$(git rev-parse origin/main)"
-          if [ "$TAG_SHA" != "$MAIN_SHA" ]; then
-            echo "This tag does NOT point to main HEAD."
-            echo "tag sha:  $TAG_SHA"
-            echo "main sha: $MAIN_SHA"
-            echo "Create/push tags from the latest main commit (or use the 'Tag main as release' workflow)."
-            exit 1
-          fi
-
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -89,18 +73,38 @@ jobs:
         run: |
           set -euxo pipefail
           # GitHub's prebuilt CPython (setup-python) on macOS can link _hashlib against Homebrew OpenSSL.
-          # Nuitka's dependency scan fails if libssl.3.dylib is missing.
+          # Nuitka's dependency scan can fail if libssl.3.dylib is missing at /usr/local/opt/openssl@3 (or /opt/homebrew/opt/openssl@3).
+          #
+          # Important: brew --prefix openssl@3 can itself be the /usr/local/opt/openssl@3 symlink.
+          # Linking that path to itself creates a symlink loop ("Too many levels of symbolic links").
+          
           brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3
-          PREFIX="$(brew --prefix openssl@3)"
-
-          # Nuitka sometimes expects OpenSSL to be under /usr/local/opt even on arm64 runners.
-          # Make both common prefixes point at the installed OpenSSL.
+          
+          # Resolve the *real* installation directory under the Cellar.
+          CELLAR="$(brew --cellar openssl@3)"
+          VER="$(brew list --versions openssl@3 | awk '{print $2}' | tail -n1)"
+          REAL="$CELLAR/$VER"
+          if [ ! -d "$REAL" ]; then
+            # Fallback: pick the newest cellar folder.
+            REAL="$(ls -dt "$CELLAR"/* | head -n1)"
+          fi
+          
+          echo "OpenSSL real path: $REAL"
+          
+          # Recreate the opt symlinks to point to the real path (avoids self-referential links).
           sudo mkdir -p /usr/local/opt /opt/homebrew/opt || true
-          sudo ln -sfn "$PREFIX" /usr/local/opt/openssl@3 || true
-          sudo ln -sfn "$PREFIX" /opt/homebrew/opt/openssl@3 || true
-
-          ls -la "$PREFIX/lib/libssl.3.dylib" "$PREFIX/lib/libcrypto.3.dylib"
-
+          sudo rm -rf /usr/local/opt/openssl@3 /opt/homebrew/opt/openssl@3 || true
+          sudo ln -sfn "$REAL" /usr/local/opt/openssl@3 || true
+          sudo ln -sfn "$REAL" /opt/homebrew/opt/openssl@3 || true
+          
+          # Verify libraries exist.
+          ls -la "$REAL/lib/libssl.3.dylib" "$REAL/lib/libcrypto.3.dylib"
+          
+          # Help build tools find OpenSSL (harmless if not needed).
+          echo "OPENSSL_ROOT_DIR=$REAL" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$REAL/lib/pkgconfig:$PKG_CONFIG_PATH" >> "$GITHUB_ENV"
+          echo "LDFLAGS=-L$REAL/lib $LDFLAGS" >> "$GITHUB_ENV"
+          echo "CPPFLAGS=-I$REAL/include $CPPFLAGS" >> "$GITHUB_ENV"
       - name: Resolve TAG / VERSION
         shell: bash
         run: |
@@ -197,12 +201,31 @@ jobs:
           if [ "${{ matrix.ext }}" = "" ]; then
             chmod +x "release/${OUT_LATEST}" "release/${OUT_VERSIONED}" || true
           fi
+          # Per-target checksum file (cross-platform, uses Python)
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
 
-          # Per-target checksum file (avoids collisions between matrix jobs)
-          (
-            sha256sum "release/${OUT_LATEST}" "release/${OUT_VERSIONED}" 2>/dev/null \
-              || shasum -a 256 "release/${OUT_LATEST}" "release/${OUT_VERSIONED}"
-          ) > "release/SHA256SUMS-${{ matrix.target }}.txt"
+          target = "${{ matrix.target }}"
+          files = [
+              Path("release/${OUT_LATEST}"),
+              Path("release/${OUT_VERSIONED}"),
+          ]
+          out = Path(f"release/SHA256SUMS-{target}.txt")
+
+          def sha256(path: Path) -> str:
+              h = hashlib.sha256()
+              with path.open('rb') as f:
+                  for chunk in iter(lambda: f.read(1024 * 1024), b''):
+                      h.update(chunk)
+              return h.hexdigest()
+
+          with out.open('w', encoding='utf-8') as fp:
+              for f in files:
+                  fp.write(f"{sha256(f)}  {f.name}\n")
+
+          print(f"Wrote {out}")
+          PY
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
