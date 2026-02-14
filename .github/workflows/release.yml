@@ -34,7 +34,7 @@ jobs:
       matrix:
         include:
           - target: windows-x64
-            runner: windows-latest
+            runner: windows-2025
             ext: ".exe"
           - target: linux-x64
             runner: ubuntu-22.04
@@ -46,7 +46,7 @@ jobs:
             runner: macos-15-intel
             ext: ""
           - target: macos-arm64
-            runner: macos-14-arm64
+            runner: macos-15
             ext: ""
 
     steps:
@@ -64,47 +64,52 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
 
-      - name: "macOS: ensure Homebrew OpenSSL is present (fix Nuitka dependency scan)"
+
+      - name: "macOS: ensure OpenSSL dylibs visible for Nuitka"
         if: runner.os == 'macOS'
         shell: bash
-        env:
-          HOMEBREW_NO_AUTO_UPDATE: "1"
-          HOMEBREW_NO_INSTALL_CLEANUP: "1"
         run: |
           set -euxo pipefail
-          # GitHub's prebuilt CPython (setup-python) on macOS can link _hashlib against Homebrew OpenSSL.
-          # Nuitka's dependency scan can fail if libssl.3.dylib is missing at /usr/local/opt/openssl@3 (or /opt/homebrew/opt/openssl@3).
-          #
-          # Important: brew --prefix openssl@3 can itself be the /usr/local/opt/openssl@3 symlink.
-          # Linking that path to itself creates a symlink loop ("Too many levels of symbolic links").
-          
+
+          # Nuitka's dependency scan can fail if CPython's _hashlib expects libssl/libcrypto
+          # under a Homebrew path that doesn't exist on the current runner.
           brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3
-          
-          # Resolve the *real* installation directory under the Cellar.
-          CELLAR="$(brew --cellar openssl@3)"
-          VER="$(brew list --versions openssl@3 | awk '{print $2}' | tail -n1)"
-          REAL="$CELLAR/$VER"
-          if [ ! -d "$REAL" ]; then
-            # Fallback: pick the newest cellar folder.
-            REAL="$(ls -dt "$CELLAR"/* | head -n1)"
-          fi
-          
-          echo "OpenSSL real path: $REAL"
-          
-          # Recreate the opt symlinks to point to the real path (avoids self-referential links).
-          sudo mkdir -p /usr/local/opt /opt/homebrew/opt || true
-          sudo rm -rf /usr/local/opt/openssl@3 /opt/homebrew/opt/openssl@3 || true
-          sudo ln -sfn "$REAL" /usr/local/opt/openssl@3 || true
-          sudo ln -sfn "$REAL" /opt/homebrew/opt/openssl@3 || true
-          
-          # Verify libraries exist.
-          ls -la "$REAL/lib/libssl.3.dylib" "$REAL/lib/libcrypto.3.dylib"
-          
-          # Help build tools find OpenSSL (harmless if not needed).
-          echo "OPENSSL_ROOT_DIR=$REAL" >> "$GITHUB_ENV"
-          echo "PKG_CONFIG_PATH=$REAL/lib/pkgconfig:$PKG_CONFIG_PATH" >> "$GITHUB_ENV"
-          echo "LDFLAGS=-L$REAL/lib $LDFLAGS" >> "$GITHUB_ENV"
-          echo "CPPFLAGS=-I$REAL/include $CPPFLAGS" >> "$GITHUB_ENV"
+          PREFIX="$(brew --prefix openssl@3)"
+
+          HASHLIB="$(python - <<'PY2'
+import _hashlib
+print(_hashlib.__file__)
+PY2
+)"
+          echo "Using _hashlib at: $HASHLIB"
+
+          expected_ssl="$(otool -L "$HASHLIB" | awk '/libssl\./{print $1; exit}' || true)"
+          expected_crypto="$(otool -L "$HASHLIB" | awk '/libcrypto\./{print $1; exit}' || true)"
+          echo "Expected libssl:   $expected_ssl"
+          echo "Expected libcrypto:$expected_crypto"
+
+          for p in "$expected_ssl" "$expected_crypto"; do
+            [ -z "$p" ] && continue
+            if [ -e "$p" ]; then
+              echo "OK: $p exists"
+              continue
+            fi
+
+            base="$(basename "$p")"
+            src="$PREFIX/lib/$base"
+
+            if [ ! -e "$src" ]; then
+              echo "ERROR: source dylib not found: $src"
+              ls -la "$PREFIX/lib" || true
+              exit 1
+            fi
+
+            sudo mkdir -p "$(dirname "$p")"
+            sudo rm -f "$p" || true
+            sudo ln -sfn "$src" "$p"
+            ls -la "$p"
+          done
+
       - name: Resolve TAG / VERSION
         shell: bash
         run: |
