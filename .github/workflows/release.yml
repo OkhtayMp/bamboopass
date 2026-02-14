@@ -3,13 +3,19 @@ name: Build & Release (multi-platform)
 on:
   push:
     tags:
-      - "v*"
+      # Release tags only (e.g. v0.0.1)
+      - "v*.*.*"
   workflow_dispatch:
     inputs:
       tag:
         description: "Tag to build (e.g. v0.0.4). Required for workflow_dispatch."
         required: true
         type: string
+
+# Avoid two tag builds racing for the same repo/release.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -40,7 +46,7 @@ jobs:
             runner: macos-15-intel
             ext: ""
           - target: macos-arm64
-            runner: macos-14
+            runner: macos-14-arm64
             ext: ""
 
     steps:
@@ -52,13 +58,29 @@ jobs:
           ref: ${{ (github.event_name == 'workflow_dispatch' && inputs.tag) || github.ref }}
           fetch-depth: 0
 
+      - name: Verify tag points to main HEAD
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git fetch origin main --depth=1
+          TAG_SHA="$(git rev-parse HEAD)"
+          MAIN_SHA="$(git rev-parse origin/main)"
+          if [ "$TAG_SHA" != "$MAIN_SHA" ]; then
+            echo "This tag does NOT point to main HEAD."
+            echo "tag sha:  $TAG_SHA"
+            echo "main sha: $MAIN_SHA"
+            echo "Create/push tags from the latest main commit (or use the 'Tag main as release' workflow)."
+            exit 1
+          fi
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
 
-      - name: macOS: ensure Homebrew OpenSSL is present (fix Nuitka dependency scan)
+      - name: "macOS: ensure Homebrew OpenSSL is present (fix Nuitka dependency scan)"
         if: runner.os == 'macOS'
         shell: bash
         env:
@@ -66,14 +88,17 @@ jobs:
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
         run: |
           set -euxo pipefail
-          # Remove potentially conflicting OpenSSL shim/symlink files on the runner
-          sudo rm -f /usr/local/lib/libssl.dylib /usr/local/lib/libcrypto.dylib /opt/homebrew/lib/libssl.dylib /opt/homebrew/lib/libcrypto.dylib || true
           # GitHub's prebuilt CPython (setup-python) on macOS can link _hashlib against Homebrew OpenSSL.
           # Nuitka's dependency scan fails if libssl.3.dylib is missing.
           brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3
-          # Keep expected /usr/local/opt or /opt/homebrew/opt symlinks in place.
-          brew link --overwrite --force openssl@3 || true
           PREFIX="$(brew --prefix openssl@3)"
+
+          # Nuitka sometimes expects OpenSSL to be under /usr/local/opt even on arm64 runners.
+          # Make both common prefixes point at the installed OpenSSL.
+          sudo mkdir -p /usr/local/opt /opt/homebrew/opt || true
+          sudo ln -sfn "$PREFIX" /usr/local/opt/openssl@3 || true
+          sudo ln -sfn "$PREFIX" /opt/homebrew/opt/openssl@3 || true
+
           ls -la "$PREFIX/lib/libssl.3.dylib" "$PREFIX/lib/libcrypto.3.dylib"
 
       - name: Resolve TAG / VERSION
@@ -189,7 +214,7 @@ jobs:
   publish:
     name: Publish GitHub Release
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -208,11 +233,66 @@ jobs:
           echo "TAG=$TAG" >> "$GITHUB_ENV"
           echo "Publishing assets to tag: $TAG"
 
-      - name: Upload assets to GitHub Release
+      - name: Create or update GitHub Release + upload assets
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
+          name: ${{ env.TAG }}
+          make_latest: true
+          generate_release_notes: true
           files: release/*
           overwrite_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Optional quality-of-life: keep main showing the latest released version.
+  # If your main branch is protected, this may fail; release publishing will still succeed.
+  sync_main_version:
+    name: Sync version back to main (optional)
+    needs: publish
+    runs-on: ubuntu-22.04
+    continue-on-error: true
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Write VERSION + package version files
+        shell: bash
+        run: |
+          set -euxo pipefail
+          VERSION="${GITHUB_REF#refs/tags/}"
+          VERSION_NO_V="${VERSION#v}"
+          echo "$VERSION" > VERSION
+          export VERSION_NO_V
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          v = os.environ["VERSION_NO_V"]
+          Path("bamboopass/_build_version.py").write_text(f"__version__ = '{v}'\n")
+          # Keep pyproject version aligned too (optional).
+          import re
+          p = Path("pyproject.toml")
+          txt = p.read_text(encoding="utf-8")
+          txt2 = re.sub(r'(?m)^version\s*=\s*"[^"]+"\s*$', f'version = "{v}"', txt)
+          p.write_text(txt2, encoding="utf-8")
+          PY
+
+      - name: Commit + push (if changed)
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add VERSION bamboopass/_build_version.py pyproject.toml
+          if git diff --cached --quiet; then
+            echo "No version changes to commit."
+            exit 0
+          fi
+          git commit -m "chore: bump version to ${GITHUB_REF#refs/tags/}"
+          git push origin main
