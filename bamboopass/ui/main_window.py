@@ -5,7 +5,8 @@ from contextlib import suppress
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QCursor, QIcon, QPixmap
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QLineEdit, QPushButton, QWidget
-
+import threading
+from ..android_link import start_server
 from ..crypto import derive_password
 from ..storage import Settings
 from ..utils.colors import best_text_colors
@@ -166,10 +167,13 @@ QPushButton:pressed {{ color: darkred; }}
                 length=self._settings.password_length,
             )
             QApplication.clipboard().setText(self._password)
-
             self._done = True
             self.hide()
-
+            
+            #for android
+            server, token = start_server(self._password)
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            
             self._clipboard_timer.timeout.connect(self._check_clipboard)
             self._clipboard_timer.start(self._settings.clipboard_check_interval_ms)
 
