@@ -2,7 +2,7 @@
 
 ![Version](https://img.shields.io/github/v/release/okhtaymp/bamboopass?style=for-the-badge&color=ff6fff)
 
-## 💻 Supported Platforms
+##  💻 Supported Platforms
 
 
 
