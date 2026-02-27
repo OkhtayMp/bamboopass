@@ -14,8 +14,8 @@
 
 ## 🚀 Downloads
 
-| Platform       | Download |
-|----------------|----------|
+| Platform       | Download | SHA256SUMS |
+|----------------|----------|------------|
 | ![Static Badge](https://img.shields.io/badge/-FCC624?style=plastic&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA4OCA4OCI%2BPHJlY3QgeD0iMCIgeT0iMCIgd2lkdGg9IjQwIiBoZWlnaHQ9IjQwIiBmaWxsPSIjRkZGRkZGIi8%2BPHJlY3QgeD0iNDgiIHk9IjAiIHdpZHRoPSI0MCIgaGVpZ2h0PSI0MCIgZmlsbD0iI0ZGRkZGRiIvPjxyZWN0IHg9IjAiIHk9IjQ4IiB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIGZpbGw9IiNGRkZGRkYiLz48cmVjdCB4PSI0OCIgeT0iNDgiIHdpZHRoPSI0MCIgaGVpZ2h0PSI0MCIgZmlsbD0iI0ZGRkZGRiIvPjwvc3ZnPg%3D%3D&logoColor=white&color=blue) **Windows `x64`** | [⬇️ Download](https://github.com/okhtaymp/bamboopass/releases/latest/download/BambooPass-windows-x64.exe) |
 | ![Static Badge](https://img.shields.io/badge/-FCC624?style=plastic&logo=apple&color=black) **macOS `Intel`** | [⬇️ Download](https://github.com/okhtaymp/bamboopass/releases/latest/download/BambooPass-macos-intel) |
 | ![Static Badge](https://img.shields.io/badge/-FCC624?style=plastic&logo=apple&color=black) **macOS `ARM64`** | [⬇️ Download](https://github.com/okhtaymp/bamboopass/releases/latest/download/BambooPass-macos-arm64) |
@@ -26,6 +26,36 @@
 > No installation required. Compatible with modern versions of each platform.
 
 ---
+
+
+
+
+| Platform | Download | SHA256SUMS |
+|:--|:--:|:--:|
+| ![Windows](https://img.shields.io/badge/Windows-x64-0078D6?style=flat&logo=windows&logoColor=white) | [⬇️ Download][dl-win-x64] | [SHA256][sha-win-x64] |
+| ![macOS](https://img.shields.io/badge/macOS-Intel-000000?style=flat&logo=apple&logoColor=white) | [⬇️ Download][dl-macos-x64] | [SHA256][sha-macos-x64] |
+| ![macOS](https://img.shields.io/badge/macOS-ARM64-000000?style=flat&logo=apple&logoColor=white) | [⬇️ Download][dl-macos-arm64] | [SHA256][sha-macos-arm64] |
+| ![Linux](https://img.shields.io/badge/Linux-x64-FCC624?style=flat&logo=linux&logoColor=black) | [⬇️ Download][dl-linux-x64] | [SHA256][sha-linux-x64] |
+| ![Linux](https://img.shields.io/badge/Linux-ARM64-FCC624?style=flat&logo=linux&logoColor=black) | [⬇️ Download][dl-linux-arm64] | [SHA256][sha-linux-arm64] |
+
+> 💡 **Note:** All downloads are **single-file binaries** (no installer needed).
+
+<!-- Dynamic latest-release asset links -->
+[dl-win-x64]: https://github.com/okhtaymp/bamboopass/releases/latest/download/bamboopass-win-x64.exe
+[dl-macos-x64]: https://github.com/okhtaymp/bamboopass/releases/latest/download/bamboopass-macos-x64
+[dl-macos-arm64]: https://github.com/okhtaymp/bamboopass/releases/latest/download/bamboopass-macos-arm64
+[dl-linux-x64]: https://github.com/okhtaymp/bamboopass/releases/latest/download/bamboopass-linux-x64
+[dl-linux-arm64]: https://github.com/okhtaymp/bamboopass/releases/latest/download/bamboopass-linux-arm64
+
+<!-- Matching checksum links (also latest) -->
+[sha-win-x64]: https://github.com/okhtaymp/bamboopass/releases/latest/download/SHA256SUMS-win-x64.txt
+[sha-macos-x64]: https://github.com/okhtaymp/bamboopass/releases/latest/download/SHA256SUMS-macos-x64.txt
+[sha-macos-arm64]: https://github.com/okhtaymp/bamboopass/releases/latest/download/SHA256SUMS-macos-arm64.txt
+[sha-linux-x64]: https://github.com/okhtaymp/bamboopass/releases/latest/download/SHA256SUMS-linux-x64.txt
+[sha-linux-arm64]: https://github.com/okhtaymp/bamboopass/releases/latest/download/SHA256SUMS-linux-arm64.txt
+
+
+
 
 ## 📚 How to Use
 
