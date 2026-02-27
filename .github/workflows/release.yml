@@ -19,7 +19,6 @@ permissions:
   contents: write
 
 env:
-  PYTHON_VERSION: "3.10"
   APP_SLUG: "bamboopass"
   ENTRYPOINT: "bamboopass_entry.py"
 
@@ -35,6 +34,7 @@ jobs:
           - target: win-x64
             runner: windows-2022
             ext: ".exe"
+            python: "3.10"
             arch: x64
             rosetta: false
 
@@ -42,28 +42,31 @@ jobs:
           - target: linux-x64
             runner: ubuntu-22.04
             ext: ""
+            python: "3.10"
             arch: x64
             rosetta: false
 
           - target: linux-arm64
             runner: ubuntu-22.04-arm
             ext: ""
+            python: "3.10"
             arch: arm64
             rosetta: false
 
           # macOS
-          # IMPORTANT:
-          # macos-x64 is built on macos-14 (Apple Silicon) using Rosetta (x86_64),
-          # to avoid Nuitka dependency-scan crash seen on macos-15 intel.
+          # macos-x64: build on macos-14 with Rosetta (x86_64)
+          # IMPORTANT: Python 3.10 x64 on arm runners can fail with libintl/gettext; use 3.11+.
           - target: macos-x64
             runner: macos-14
             ext: ""
+            python: "3.11"
             arch: x64
             rosetta: true
 
           - target: macos-arm64
             runner: macos-14
             ext: ""
+            python: "3.11"
             arch: arm64
             rosetta: false
 
@@ -74,19 +77,19 @@ jobs:
           ref: ${{ (github.event_name == 'workflow_dispatch' && inputs.tag) || github.ref }}
           fetch-depth: 0
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
-          architecture: ${{ matrix.arch }}
-
       - name: Ensure Rosetta (macOS x64)
         if: runner.os == 'macOS' && matrix.rosetta == true
         shell: bash
         run: |
           set -euxo pipefail
           /usr/sbin/softwareupdate --install-rosetta --agree-to-license
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          architecture: ${{ matrix.arch }}
+          cache: pip
 
       - name: Resolve TAG / VERSION
         shell: bash
@@ -114,11 +117,8 @@ jobs:
           tag = os.environ["TAG"]
           version = os.environ["VERSION"]
 
-          # Runtime version used by the app
-          bv = Path("bamboopass/_build_version.py")
-          bv.write_text(f'__version__ = "{version}"\n', encoding="utf-8")
+          Path("bamboopass/_build_version.py").write_text(f'__version__ = "{version}"\n', encoding="utf-8")
 
-          # Optional: make package metadata match (helps importlib.metadata)
           pyproject = Path("pyproject.toml")
           if pyproject.exists():
               txt = pyproject.read_text(encoding="utf-8")
@@ -143,12 +143,11 @@ jobs:
 
           if [ "${{ runner.os }}" = "macOS" ] && [ "${{ matrix.rosetta }}" = "true" ]; then
             arch -x86_64 python -m pip install --upgrade pip
-            arch -x86_64 pip install nuitka zstandard PySide6 platformdirs
+            arch -x86_64 pip install Nuitka zstandard PySide6 platformdirs
             arch -x86_64 pip install -e .
           else
             python -m pip install --upgrade pip
-            # zstandard is required for Nuitka onefile compression
-            pip install nuitka zstandard PySide6 platformdirs
+            pip install Nuitka zstandard PySide6 platformdirs
             pip install -e .
           fi
 
@@ -179,10 +178,6 @@ jobs:
           set -euxo pipefail
           mkdir -p release
 
-          # Nuitka onefile output is usually:
-          #  - dist/<entry>.exe (Windows)
-          #  - dist/<entry>.bin (Linux/macOS)
-          #  - sometimes dist/<entry> (depending on options)
           if [ -f "dist/bamboopass_entry.exe" ]; then
             BIN_PATH="dist/bamboopass_entry.exe"
           elif [ -f "dist/bamboopass_entry.bin" ]; then
@@ -195,7 +190,7 @@ jobs:
             exit 1
           fi
 
-          # دقیقاً همین اسم‌ها:
+          # اسم دقیق فایل‌ها:
           # bamboopass-win-x64.exe
           # bamboopass-v0.0.4-win-x64.exe
           OUT_LATEST="${APP_SLUG}-${{ matrix.target }}${{ matrix.ext }}"
