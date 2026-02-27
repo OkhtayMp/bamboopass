@@ -3,7 +3,6 @@ name: Build & Release (multi-platform)
 on:
   push:
     tags:
-      # Release tags only (e.g. v0.0.1)
       - "v*.*.*"
   workflow_dispatch:
     inputs:
@@ -12,7 +11,6 @@ on:
         required: true
         type: string
 
-# Avoid two tag builds racing for the same repo/release.
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -53,8 +51,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # On tag push: github.ref is refs/tags/vX.Y.Z
-          # On workflow_dispatch: inputs.tag is vX.Y.Z
           ref: ${{ (github.event_name == 'workflow_dispatch' && inputs.tag) || github.ref }}
           fetch-depth: 0
 
@@ -64,15 +60,12 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
 
-
       - name: "macOS: ensure OpenSSL dylibs visible for Nuitka"
         if: runner.os == 'macOS'
         shell: bash
         run: |
           set -euxo pipefail
 
-          # Nuitka's dependency scan can fail if CPython's _hashlib expects libssl/libcrypto
-          # under a Homebrew path that doesn't exist on the current runner.
           brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3
           PREFIX="$(brew --prefix openssl@3)"
 
@@ -113,6 +106,7 @@ jobs:
       - name: Resolve TAG / VERSION
         shell: bash
         run: |
+          set -euxo pipefail
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             TAG="${{ inputs.tag }}"
           else
@@ -122,12 +116,12 @@ jobs:
 
           echo "TAG=$TAG" >> "$GITHUB_ENV"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-
           echo "Resolved TAG=$TAG VERSION=$VERSION"
 
       - name: Inject version into source (no sed)
         shell: bash
         run: |
+          set -euxo pipefail
           python - <<'PY'
           import os, re
           from pathlib import Path
@@ -135,11 +129,9 @@ jobs:
           tag = os.environ["TAG"]
           version = os.environ["VERSION"]
 
-          # Runtime version used by the app
           bv = Path("bamboopass/_build_version.py")
           bv.write_text(f'__version__ = "{version}"\n', encoding="utf-8")
 
-          # Optional: make package metadata match (helps importlib.metadata)
           pyproject = Path("pyproject.toml")
           if pyproject.exists():
               txt = pyproject.read_text(encoding="utf-8")
@@ -160,14 +152,15 @@ jobs:
       - name: Install build dependencies
         shell: bash
         run: |
+          set -euxo pipefail
           python -m pip install --upgrade pip
-          # zstandard is required for Nuitka onefile compression
           pip install nuitka zstandard PySide6 platformdirs
           pip install -e .
 
       - name: Build (Nuitka onefile)
         shell: bash
         run: |
+          set -euxo pipefail
           python -m nuitka \
             --mode=onefile \
             --enable-plugin=pyside6 \
@@ -178,12 +171,9 @@ jobs:
       - name: Prepare release files
         shell: bash
         run: |
+          set -euxo pipefail
           mkdir -p release
 
-          # Nuitka onefile output is usually:
-          #  - dist/<entry>.exe (Windows)
-          #  - dist/<entry>.bin (Linux/macOS)
-          #  - sometimes dist/<entry> (depending on options)
           if [ -f "dist/bamboopass_entry.exe" ]; then
             BIN_PATH="dist/bamboopass_entry.exe"
           elif [ -f "dist/bamboopass_entry.bin" ]; then
@@ -199,38 +189,45 @@ jobs:
           OUT_LATEST="${APP_NAME}-${{ matrix.target }}${{ matrix.ext }}"
           OUT_VERSIONED="${APP_NAME}-${TAG}-${{ matrix.target }}${{ matrix.ext }}"
 
-          cp "$BIN_PATH" "release/${OUT_LATEST}"
-          cp "$BIN_PATH" "release/${OUT_VERSIONED}"
+          cp "$BIN_PATH" "release/$OUT_LATEST"
+          cp "$BIN_PATH" "release/$OUT_VERSIONED"
 
-          # Make sure it's executable on Unix-y runners
           if [ "${{ matrix.ext }}" = "" ]; then
-            chmod +x "release/${OUT_LATEST}" "release/${OUT_VERSIONED}" || true
+            chmod +x "release/$OUT_LATEST" "release/$OUT_VERSIONED" || true
           fi
-          # Per-target checksum file (cross-platform, uses Python)
+
+          export OUT_LATEST OUT_VERSIONED
+
           python - <<'PY'
-          import hashlib
+          import os, hashlib
           from pathlib import Path
 
-          target = "${{ matrix.target }}"
+          target = os.environ.get("MATRIX_TARGET", "")
+          if not target:
+              # fallback: still write a target-specific file name if env not present
+              target = "unknown-target"
+
           files = [
-              Path("release/${OUT_LATEST}"),
-              Path("release/${OUT_VERSIONED}"),
+              Path("release") / os.environ["OUT_LATEST"],
+              Path("release") / os.environ["OUT_VERSIONED"],
           ]
-          out = Path(f"release/SHA256SUMS-{target}.txt")
+          out = Path("release") / f"SHA256SUMS-{target}.txt"
 
           def sha256(path: Path) -> str:
               h = hashlib.sha256()
-              with path.open('rb') as f:
-                  for chunk in iter(lambda: f.read(1024 * 1024), b''):
+              with path.open("rb") as f:
+                  for chunk in iter(lambda: f.read(1024 * 1024), b""):
                       h.update(chunk)
               return h.hexdigest()
 
-          with out.open('w', encoding='utf-8') as fp:
+          with out.open("w", encoding="utf-8") as fp:
               for f in files:
                   fp.write(f"{sha256(f)}  {f.name}\n")
 
           print(f"Wrote {out}")
           PY
+        env:
+          MATRIX_TARGET: ${{ matrix.target }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -253,6 +250,7 @@ jobs:
       - name: Resolve TAG for publishing
         shell: bash
         run: |
+          set -euxo pipefail
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             TAG="${{ inputs.tag }}"
           else
@@ -273,8 +271,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Optional quality-of-life: keep main showing the latest released version.
-  # If your main branch is protected, this may fail; release publishing will still succeed.
   sync_main_version:
     name: Sync version back to main (optional)
     needs: publish
@@ -300,15 +296,15 @@ jobs:
           export VERSION_NO_V
           python - <<'PY'
           from pathlib import Path
-          import os
+          import os, re
           v = os.environ["VERSION_NO_V"]
-          Path("bamboopass/_build_version.py").write_text(f"__version__ = '{v}'\n")
-          # Keep pyproject version aligned too (optional).
-          import re
+          Path("bamboopass/_build_version.py").write_text(f"__version__ = '{v}'\n", encoding="utf-8")
+
           p = Path("pyproject.toml")
-          txt = p.read_text(encoding="utf-8")
-          txt2 = re.sub(r'(?m)^version\s*=\s*"[^"]+"\s*$', f'version = "{v}"', txt)
-          p.write_text(txt2, encoding="utf-8")
+          if p.exists():
+              txt = p.read_text(encoding="utf-8")
+              txt2 = re.sub(r'(?m)^version\s*=\s*"[^"]+"\s*$', f'version = "{v}"', txt)
+              p.write_text(txt2, encoding="utf-8")
           PY
 
       - name: Commit + push (if changed)
