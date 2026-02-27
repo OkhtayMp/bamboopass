@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=70", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bamboopass"
+version = "0.0.0"
+description = "Deterministic password generator (PySide6 GUI)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "Okhtay"}]
+dependencies = [
+  "PySide6>=6.5",
+  "platformdirs>=4.0",
+]
+
+[project.scripts]
+bamboopass = "bamboopass.app:run"
+
+[tool.setuptools]
+packages = ["bamboopass", "bamboopass.ui", "bamboopass.utils"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["bamboopass", "tests"]
+
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["bamboopass"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
