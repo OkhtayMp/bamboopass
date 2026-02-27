@@ -1,7 +1,10 @@
+<p align="center">
+  <img src="assets/images/logo.png" alt="BambooPass" width="160">
+</p>
+
 # 🔐 BambooPass — Deterministic Password Generator (GUI)
 
 ![Version](https://img.shields.io/github/v/release/okhtaymp/bamboopass?style=for-the-badge&color=ff6fff)
-
 
 BambooPass is a tiny, cross‑platform **GUI** tool that generates **strong, deterministic passwords**.
 
