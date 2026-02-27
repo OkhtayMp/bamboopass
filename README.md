@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="assets/images/logo.png" alt="BambooPass" width="160">
-</p>
+<img src="assets/images/banner.png" alt="banner" width="100%" />
 
 # 🔐 BambooPass — Deterministic Password Generator (GUI)
 
