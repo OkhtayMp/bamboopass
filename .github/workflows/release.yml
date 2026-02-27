@@ -31,25 +31,41 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Windows
           - target: win-x64
             runner: windows-2022
             ext: ".exe"
+            arch: x64
+            rosetta: false
 
+          # Linux
           - target: linux-x64
             runner: ubuntu-22.04
             ext: ""
+            arch: x64
+            rosetta: false
 
           - target: linux-arm64
             runner: ubuntu-22.04-arm
             ext: ""
+            arch: arm64
+            rosetta: false
 
+          # macOS
+          # IMPORTANT:
+          # macos-x64 is built on macos-14 (Apple Silicon) using Rosetta (x86_64),
+          # to avoid Nuitka dependency-scan crash seen on macos-15 intel.
           - target: macos-x64
-            runner: macos-15-intel
+            runner: macos-14
             ext: ""
+            arch: x64
+            rosetta: true
 
           - target: macos-arm64
             runner: macos-14
             ext: ""
+            arch: arm64
+            rosetta: false
 
     steps:
       - name: Checkout
@@ -63,49 +79,14 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
+          architecture: ${{ matrix.arch }}
 
-      - name: "macOS: ensure OpenSSL dylibs visible for Nuitka"
-        if: runner.os == 'macOS'
+      - name: Ensure Rosetta (macOS x64)
+        if: runner.os == 'macOS' && matrix.rosetta == true
         shell: bash
         run: |
           set -euxo pipefail
-
-          brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3
-          PREFIX="$(brew --prefix openssl@3)"
-
-          HASHLIB="$(python - <<'PY2'
-          import _hashlib
-          print(_hashlib.__file__)
-          PY2
-          )"
-          echo "Using _hashlib at: $HASHLIB"
-
-          expected_ssl="$(otool -L "$HASHLIB" | awk '/libssl\./{print $1; exit}' || true)"
-          expected_crypto="$(otool -L "$HASHLIB" | awk '/libcrypto\./{print $1; exit}' || true)"
-          echo "Expected libssl:   $expected_ssl"
-          echo "Expected libcrypto:$expected_crypto"
-
-          for p in "$expected_ssl" "$expected_crypto"; do
-            [ -z "$p" ] && continue
-            if [ -e "$p" ]; then
-              echo "OK: $p exists"
-              continue
-            fi
-
-            base="$(basename "$p")"
-            src="$PREFIX/lib/$base"
-
-            if [ ! -e "$src" ]; then
-              echo "ERROR: source dylib not found: $src"
-              ls -la "$PREFIX/lib" || true
-              exit 1
-            fi
-
-            sudo mkdir -p "$(dirname "$p")"
-            sudo rm -f "$p" || true
-            sudo ln -sfn "$src" "$p"
-            ls -la "$p"
-          done
+          /usr/sbin/softwareupdate --install-rosetta --agree-to-license
 
       - name: Resolve TAG / VERSION
         shell: bash
@@ -133,9 +114,11 @@ jobs:
           tag = os.environ["TAG"]
           version = os.environ["VERSION"]
 
+          # Runtime version used by the app
           bv = Path("bamboopass/_build_version.py")
           bv.write_text(f'__version__ = "{version}"\n', encoding="utf-8")
 
+          # Optional: make package metadata match (helps importlib.metadata)
           pyproject = Path("pyproject.toml")
           if pyproject.exists():
               txt = pyproject.read_text(encoding="utf-8")
@@ -157,21 +140,38 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          python -m pip install --upgrade pip
-          # zstandard is required for Nuitka onefile compression
-          pip install nuitka zstandard PySide6 platformdirs
-          pip install -e .
+
+          if [ "${{ runner.os }}" = "macOS" ] && [ "${{ matrix.rosetta }}" = "true" ]; then
+            arch -x86_64 python -m pip install --upgrade pip
+            arch -x86_64 pip install nuitka zstandard PySide6 platformdirs
+            arch -x86_64 pip install -e .
+          else
+            python -m pip install --upgrade pip
+            # zstandard is required for Nuitka onefile compression
+            pip install nuitka zstandard PySide6 platformdirs
+            pip install -e .
+          fi
 
       - name: Build (Nuitka onefile)
         shell: bash
         run: |
           set -euxo pipefail
-          python -m nuitka \
-            --mode=onefile \
-            --enable-plugin=pyside6 \
-            --assume-yes-for-downloads \
-            --output-dir=dist \
-            "${ENTRYPOINT}"
+
+          if [ "${{ runner.os }}" = "macOS" ] && [ "${{ matrix.rosetta }}" = "true" ]; then
+            arch -x86_64 python -m nuitka \
+              --mode=onefile \
+              --enable-plugin=pyside6 \
+              --assume-yes-for-downloads \
+              --output-dir=dist \
+              "${ENTRYPOINT}"
+          else
+            python -m nuitka \
+              --mode=onefile \
+              --enable-plugin=pyside6 \
+              --assume-yes-for-downloads \
+              --output-dir=dist \
+              "${ENTRYPOINT}"
+          fi
 
       - name: Prepare release files
         shell: bash
@@ -195,13 +195,15 @@ jobs:
             exit 1
           fi
 
+          # دقیقاً همین اسم‌ها:
+          # bamboopass-win-x64.exe
+          # bamboopass-v0.0.4-win-x64.exe
           OUT_LATEST="${APP_SLUG}-${{ matrix.target }}${{ matrix.ext }}"
           OUT_VERSIONED="${APP_SLUG}-${TAG}-${{ matrix.target }}${{ matrix.ext }}"
 
           cp "$BIN_PATH" "release/$OUT_LATEST"
           cp "$BIN_PATH" "release/$OUT_VERSIONED"
 
-          # Make sure it's executable on Unix-y runners
           if [ "${{ matrix.ext }}" = "" ]; then
             chmod +x "release/$OUT_LATEST" "release/$OUT_VERSIONED" || true
           fi
