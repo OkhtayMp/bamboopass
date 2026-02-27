@@ -77,10 +77,10 @@ jobs:
           PREFIX="$(brew --prefix openssl@3)"
 
           HASHLIB="$(python - <<'PY2'
-import _hashlib
-print(_hashlib.__file__)
-PY2
-)"
+          import _hashlib
+          print(_hashlib.__file__)
+          PY2
+          )"
           echo "Using _hashlib at: $HASHLIB"
 
           expected_ssl="$(otool -L "$HASHLIB" | awk '/libssl\./{print $1; exit}' || true)"
